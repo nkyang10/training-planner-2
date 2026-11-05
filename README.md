@@ -14,12 +14,13 @@ PoC1 is archived at `../training-planner-poc1` (git `540095a`, 842 tests, PRs #6
 | Coach gateway | http://127.0.0.1:8090/v1 | OpenAI-compatible; memory + calendar + validation + model call |
 | Private calendar | http://127.0.0.1:8091/calendar | sessions booked by the coach, activities from Garmin; dev token `demo-token` |
 | Coach bubble | inside the calendar | floating **💬 Coach** button: quick chat without leaving the calendar; same coach, same memory, same bookings |
+| Native calendar | Open WebUI sidebar → Calendar | the coach's sessions are mirrored as all-day events, with reminders, inside Open WebUI |
 
 ## Flow
 
 1. Open the chat and say anything. Chit-chat is fine.
 2. Say something training-related: goal, days, constraints. The coach replies and books sessions.
-3. Open the calendar: future days show the booked sessions; the reply carries the calendar link. Use the **💬 Coach** bubble there for quick turns.
+3. Open the calendar: future days show the booked sessions; the reply carries the calendar link. Use the **💬 Coach** bubble there for quick turns. In Open WebUI, **sidebar → Calendar** shows the same sessions natively.
 4. Sync Garmin on the calendar; completed activities appear on their days.
 5. Come back and ask: the coach references the remembered training and the Garmin activities without being reminded.
 
@@ -34,6 +35,10 @@ $env:POC2_MODEL_API_KEY='<local model key>'
 $env:POC2_MODEL_NAME='dgx/general'
 $env:POC2_CALENDAR_URL='http://192.168.1.162:8091/calendar'
 $env:GARMIN_PERSONAL_API_KEY='<Garmin personal API key>'
+$env:OPENWEBUI_URL='http://127.0.0.1:3010'
+$env:OPENWEBUI_EMAIL='owner@poc2.local'
+$env:OPENWEBUI_PASSWORD='<Open WebUI password>'
+$env:POC2_TIMEZONE_OFFSET='+08:00'
 npx tsx src/index.ts
 ```
 
@@ -48,6 +53,8 @@ the admin config call that registers `poc2-coach`, and the first-user signup.
   surface; the gateway is the model.
 - [`docs/adr/0003-in-calendar-chat-bubble.md`](docs/adr/0003-in-calendar-chat-bubble.md) — the in-calendar bubble is a
   same-origin client of the gateway, not an iframe of Open WebUI.
+- [`docs/adr/0004-native-calendar-mirror.md`](docs/adr/0004-native-calendar-mirror.md) — sessions mirror into Open WebUI's
+  native Calendar; no fork and no iframe.
 
 ## Gates
 
@@ -69,4 +76,5 @@ https://github.com/nkyang10/training-planner-2
 - [x] Proactive memory, validated future bookings, private calendar
 - [x] Garmin sync into the calendar
 - [x] Returning-user recognition
+- [x] Native Open WebUI Calendar mirror (no fork, no iframe)
 - [ ] Manual calendar editing (deliberately absent: the coach is the only writer)

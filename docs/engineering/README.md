@@ -25,7 +25,9 @@ browser ── Open WebUI :3010 ──► coach gateway :8090 ──► local mo
                   └─ the chat product        calendar :8091 ── SQLite data/poc2.sqlite
 ```
 
-Open WebUI is only the chat surface. The calendar embeds a small chat bubble that calls `POST /chat` on the calendar
+Open WebUI is the chat surface, and its native Calendar is the in-product schedule view: booked sessions are mirrored
+into it as all-day events (`src/openwebui-calendar.ts`, ADR-0004). The research behind that choice is in
+[`embedding-research.md`](embedding-research.md). The calendar embeds a small chat bubble that calls `POST /chat` on the calendar
 origin, which proxies to the same gateway (ADR-0003). The gateway is registered as the OpenAI model `poc2-coach`, so every chat turn
 carries the runner's memories, upcoming sessions and Garmin activities; the model answers with one JSON turn that the
 gateway validates before writing.
@@ -49,6 +51,13 @@ npx tsx src/index.ts
 | http://127.0.0.1:3010 | Open WebUI chat |
 | http://127.0.0.1:8090/v1 | coach gateway (OpenAI-compatible) |
 | http://127.0.0.1:8091/calendar | private calendar (dev token `demo-token`) |
+
+## Native calendar mirror
+
+Set `OPENWEBUI_URL`, `OPENWEBUI_EMAIL`, `OPENWEBUI_PASSWORD` and optionally `POC2_TIMEZONE_OFFSET` (default `+08:00`).
+After a validated turn books sessions, the gateway creates or updates one all-day event per session on the user's default
+calendar. Events carry `meta.poc2_session_id`, so re-planning updates instead of duplicating. A mirror failure does not
+lose the booking in PoC2's SQLite.
 
 ## Gates
 

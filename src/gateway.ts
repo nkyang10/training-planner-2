@@ -8,7 +8,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { buildCoachHistory, buildCoachPrompt, parseCoachTurn } from "./coach";
-import type { Message, Store } from "./types";
+import type { CalendarMirror } from "./openwebui-calendar";
+import type { Store } from "./types";
 
 export interface GatewayOptions {
   store: Store;
@@ -20,6 +21,8 @@ export interface GatewayOptions {
   modelId?: string;
   /** Where the runner opens the calendar the coach writes into. */
   calendarUrl?: string;
+  /** Optional mirror into Open WebUI's native Calendar (no fork, no iframe). */
+  calendarMirror?: CalendarMirror;
   now?: () => string;
   fetchImpl?: typeof fetch;
 }
@@ -113,7 +116,7 @@ async function askModel(
   }
 }
 
-function completionBody(id: string, model: string, reply: string, created: number, meta: { sessions: number; memories: number }): unknown {
+function completionBody(id: string, model: string, reply: string, created: number, meta: { sessions: number; memories: number; calendarEvents: number }): unknown {
   return {
     id,
     object: "chat.completion",
@@ -239,6 +242,24 @@ export function createGateway(options: GatewayOptions): Gateway {
           });
         }
       }
+      let calendarEvents = 0;
+      if (parsed.ok && parsed.turn.sessions.length > 0 && options.calendarMirror !== undefined) {
+        try {
+          const mirrored = await options.calendarMirror.ensureEvents(
+            parsed.turn.sessions.map((draft) => ({
+              sessionId: `session:${createHash("sha256").update(`${userId}:${draft.day}:${draft.kind}:${draft.title}`).digest("hex").slice(0, 32)}`,
+              day: draft.day,
+              title: draft.title,
+              description: draft.note ?? `Booked by the AI coach (${draft.kind}).`,
+              kind: draft.kind,
+            })),
+          );
+          calendarEvents = mirrored.created + mirrored.updated;
+        } catch {
+          // The native calendar is a view; a mirror failure must not lose the booking in PoC2's own store.
+          calendarEvents = 0;
+        }
+      }
       options.store.appendMessage({ messageId: randomUUID(), userId, role: "assistant", text: reply, createdAt: now() });
 
       const id = `chatcmpl-${randomUUID()}`;
@@ -256,7 +277,7 @@ export function createGateway(options: GatewayOptions): Gateway {
         response.end();
         return;
       }
-      sendJson(response, 200, completionBody(id, modelId, reply, created, { sessions: bookedSessions, memories: remembered }));
+      sendJson(response, 200, completionBody(id, modelId, reply, created, { sessions: bookedSessions, memories: remembered, calendarEvents }));
     })().catch((error: unknown) => {
       if (!response.headersSent) {
         sendJson(response, 500, { error: { code: "gateway-failed", detail: error instanceof Error ? error.message : String(error) } });

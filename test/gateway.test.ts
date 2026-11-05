@@ -17,7 +17,7 @@ const modelFetch = (content: unknown): typeof fetch =>
       headers: { "content-type": "application/json" },
     })) as unknown as typeof fetch;
 
-const base = async (fetchImpl: typeof fetch) => {
+const base = async (fetchImpl: typeof fetch, calendarMirror?: { ensureEvents(events: readonly { sessionId: string; day: string; title: string; description: string; kind: string }[]): Promise<{ created: number; updated: number; skipped: number }> }) => {
   const handle = createStore(":memory:");
   const gateway = createGateway({
     store: handle.store,
@@ -28,6 +28,7 @@ const base = async (fetchImpl: typeof fetch) => {
     calendarUrl: "http://calendar.test",
     now: () => `${TODAY}T08:00:00.000Z`,
     fetchImpl,
+    ...(calendarMirror === undefined ? {} : { calendarMirror }),
   });
   await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
   const address = gateway.server.address();
@@ -119,6 +120,27 @@ describe("coach dedupe and calendar link", () => {
     const body = (await second.json()) as { choices: Array<{ message: { content: string } }> };
     expect(body.choices[0]?.message.content).toContain("http://calendar.test");
     expect(handle.store.listSessions(USER, TODAY, "2026-11-30")).toHaveLength(1);
+  });
+});
+
+describe("native calendar mirror metadata", () => {
+  it("reports mirrored events without changing the chat reply", async () => {
+    let mirrored = 0;
+    const { handle, gateway, url } = await base(modelFetch(VALID), {
+      async ensureEvents(events) {
+        mirrored = events.length;
+        return { created: events.length, updated: 0, skipped: 0 };
+      },
+    });
+    cleanup = async () => {
+      await gateway.close();
+      handle.close();
+    };
+    const response = await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Plan my week" }] });
+    const body = (await response.json()) as { choices: Array<{ message: { content: string } }>; poc2: { calendarEvents: number } };
+    expect(body.choices[0]?.message.content).toContain("Booked an easy Friday");
+    expect(body.poc2.calendarEvents).toBe(1);
+    expect(mirrored).toBe(1);
   });
 });
 

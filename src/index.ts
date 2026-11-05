@@ -4,6 +4,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createGarminClient } from "./garmin";
+import { createOpenWebUiCalendar } from "./openwebui-calendar";
 import { createGateway } from "./gateway";
 import { createStore } from "./store";
 import { createWeb } from "./web";
@@ -23,6 +24,19 @@ if (databaseSpec.startsWith("sqlite:")) {
 const handle = createStore(databaseSpec);
 const garmin = garminKey === undefined || garminKey.length === 0 ? undefined : createGarminClient({ apiKey: garminKey });
 
+const openWebUiUrl = process.env["OPENWEBUI_URL"];
+const openWebUiEmail = process.env["OPENWEBUI_EMAIL"];
+const openWebUiPassword = process.env["OPENWEBUI_PASSWORD"];
+const calendarMirror =
+  openWebUiUrl === undefined || openWebUiEmail === undefined || openWebUiPassword === undefined
+    ? undefined
+    : createOpenWebUiCalendar({
+        baseUrl: openWebUiUrl,
+        email: openWebUiEmail,
+        password: openWebUiPassword,
+        ...(process.env["POC2_TIMEZONE_OFFSET"] === undefined ? {} : { timezoneOffset: process.env["POC2_TIMEZONE_OFFSET"] }),
+      });
+
 const gateway = createGateway({
   store: handle.store,
   userId,
@@ -31,6 +45,7 @@ const gateway = createGateway({
   modelName: process.env["POC2_MODEL_NAME"] ?? "dgx/general",
   modelId: process.env["POC2_MODEL_ID"] ?? "poc2-coach",
   calendarUrl: process.env["POC2_CALENDAR_URL"] ?? "http://127.0.0.1:8091/calendar",
+  ...(calendarMirror === undefined ? {} : { calendarMirror }),
 });
 
 const web = createWeb({
