@@ -37,6 +37,15 @@ npx tsx apps/web/src/index.ts
 
 `pnpm install` is required once because `node_modules` was not archived.
 
+## PoC2 repository
+
+| Fact | Value |
+|---|---|
+| GitHub | https://github.com/nkyang10/training-planner-2 |
+| Visibility | public |
+| Default branch | `main` |
+| Remote | `origin` -> `https://github.com/nkyang10/training-planner-2.git` |
+
 ## PoC2 status
 
 - [x] PoC1 archived and verified (clean working tree, git history intact)
