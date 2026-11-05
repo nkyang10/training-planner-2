@@ -1,56 +1,69 @@
-# training-planner — PoC2 workspace
+# training-planner — PoC2
 
-This folder is the clean **PoC2** environment. Nothing from PoC1 is assumed here: no stack, no architecture, no
-contracts. The brief for PoC2 has not been given yet; when it arrives it is written to
-[`docs/POC2-BRIEF.md`](docs/POC2-BRIEF.md) first, and the structure follows the brief.
+PoC2 is **the conversation is the product**. After login the runner talks to an AI coach in a normal chat surface; the
+coach remembers facts on its own, builds a periodic training system, and books future sessions into a private calendar.
+Garmin activities complete the record, and the next conversation starts from what the coach remembers.
 
-## PoC1 archive
+PoC1 is archived at `../training-planner-poc1` (git `540095a`, 842 tests, PRs #66–#90).
 
-PoC1 is preserved at `../training-planner-poc1`.
+## What exists now
 
-| Fact | Value |
-|---|---|
-| Path | `C:\Users\MY\Desktop\Development\training-planner-poc1` |
-| Git HEAD | `540095a` (`fix(web): request a program from the calendar and read the API plan firstDay`, PR #90) |
-| History | PRs #66–#90, ADR-0001…0012 |
-| Tests at archive | 842/842 in 51 files |
-| Data | `data/local.sqlite` and `data/uploads/` copied; `node_modules` excluded |
-| GitHub | `https://github.com/nkyang10/training-planner` |
+| Surface | URL | What it is |
+|---|---|---|
+| Chat | http://127.0.0.1:3010 | **Open WebUI**, unforked; the coach is the model `poc2-coach` |
+| Coach gateway | http://127.0.0.1:8090/v1 | OpenAI-compatible; memory + calendar + validation + model call |
+| Private calendar | http://127.0.0.1:8091/calendar | sessions booked by the coach, activities from Garmin; dev token `demo-token` |
 
-To run PoC1 again:
+## Flow
+
+1. Open the chat and say anything. Chit-chat is fine.
+2. Say something training-related: goal, days, constraints. The coach replies and books sessions.
+3. Open the calendar: future days show the booked sessions; the reply carries the calendar link.
+4. Sync Garmin on the calendar; completed activities appear on their days.
+5. Come back and ask: the coach references the remembered training and the Garmin activities without being reminded.
+
+## Quick start
 
 ```powershell
-cd C:\Users\MY\Desktop\Development\training-planner-poc1
 pnpm install
-# API
-$env:API_TOKENS='{"demo-token":"d3d3d3d3-d3d3-4d3d-8d3d-d3d3d3d3d3d3"}'
-$env:TRAINING_PLANNER_DB='sqlite:data/local.sqlite'
-$env:PORT='8082'
-npx tsx apps/api/src/index.ts
-# Web (second terminal)
-$env:API_TOKENS='{"demo-token":"d3d3d3d3-d3d3-4d3d-8d3d-d3d3d3d3d3d3"}'
-$env:TRAINING_PLANNER_DB='sqlite:data/local.sqlite'
-$env:PORT='8081'
-$env:TRAINING_PLANNER_API_URL='http://127.0.0.1:8082'
-npx tsx apps/web/src/index.ts
+$env:POC2_TOKENS='{"demo-token":"demo-runner"}'
+$env:POC2_DB='sqlite:data/poc2.sqlite'
+$env:POC2_MODEL_BASE_URL='http://192.168.1.202:8102/v1'
+$env:POC2_MODEL_API_KEY='<local model key>'
+$env:POC2_MODEL_NAME='dgx/general'
+$env:POC2_CALENDAR_URL='http://192.168.1.162:8091/calendar'
+$env:GARMIN_PERSONAL_API_KEY='<Garmin personal API key>'
+npx tsx src/index.ts
 ```
 
-`pnpm install` is required once because `node_modules` was not archived.
+Open WebUI is a container; see [`docs/engineering/open-webui.md`](docs/engineering/open-webui.md) for the exact command,
+the admin config call that registers `poc2-coach`, and the first-user signup.
+
+## Design decisions
+
+- [`docs/adr/0001-llm-proposes-server-validates.md`](docs/adr/0001-llm-proposes-server-validates.md) — the LLM proposes,
+  the server validates, the calendar is the only artefact.
+- [`docs/adr/0002-open-webui-chat-surface.md`](docs/adr/0002-open-webui-chat-surface.md) — Open WebUI is the chat
+  surface; the gateway is the model.
+
+## Gates
+
+```powershell
+node tools/lint.mjs
+pnpm typecheck
+pnpm test
+```
 
 ## PoC2 repository
 
-| Fact | Value |
-|---|---|
-| GitHub | https://github.com/nkyang10/training-planner-2 |
-| Visibility | public |
-| Default branch | `main` |
-| Remote | `origin` -> `https://github.com/nkyang10/training-planner-2.git` |
+https://github.com/nkyang10/training-planner-2
 
-## PoC2 status
+## Status
 
-- [x] PoC1 archived and verified (clean working tree, git history intact)
-- [x] Empty workspace prepared
-- [ ] PoC2 brief received
-- [ ] PoC2 structure created from the brief
-
-Until the brief is received, this workspace intentionally contains only documentation.
+- [x] PoC1 archived
+- [x] PoC2 brief recorded
+- [x] Chat-first coach on Open WebUI
+- [x] Proactive memory, validated future bookings, private calendar
+- [x] Garmin sync into the calendar
+- [x] Returning-user recognition
+- [ ] Manual calendar editing (deliberately absent: the coach is the only writer)
