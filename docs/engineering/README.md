@@ -25,7 +25,8 @@ browser ── Open WebUI :3010 ──► coach gateway :8090 ──► local mo
                   └─ the chat product        calendar :8091 ── SQLite data/poc2.sqlite
 ```
 
-Open WebUI is only the chat surface. The gateway is registered as the OpenAI model `poc2-coach`, so every chat turn
+Open WebUI is only the chat surface. The calendar embeds a small chat bubble that calls `POST /chat` on the calendar
+origin, which proxies to the same gateway (ADR-0003). The gateway is registered as the OpenAI model `poc2-coach`, so every chat turn
 carries the runner's memories, upcoming sessions and Garmin activities; the model answers with one JSON turn that the
 gateway validates before writing.
 

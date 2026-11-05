@@ -14,6 +14,16 @@ login (Open WebUI) → chat (one turn at a time) → coach books future sessions
                                             → next chat starts from memory + activities
 ```
 
+## Two chat surfaces, one coach
+
+| Surface | Where | What it is |
+|---|---|---|
+| Full chat | Open WebUI `:3010` | threads, streaming, mobile, long conversations |
+| Chat bubble | inside the calendar `:8091` | quick turns without leaving the calendar; same gateway, same memory, same writes |
+
+The bubble is not an iframe of Open WebUI. It is a small same-origin client of `POST /chat`, which proxies to the coach
+gateway (ADR-0003). A booking made in the bubble appears in the calendar after a refresh; the bubble says so.
+
 ## Rules the design keeps
 
 | Rule | Why |
@@ -28,13 +38,14 @@ login (Open WebUI) → chat (one turn at a time) → coach books future sessions
 
 ## Surfaces
 
-- **Chat** (Open WebUI): threads, streaming, mobile.
-- **Calendar** (PoC2 server): month grid, day detail, Garmin sync button, link back to chat.
+- **Calendar** (PoC2 server): month grid, day detail, Garmin sync button, floating coach bubble, link to full chat.
+- **Full chat** (Open WebUI): threads, streaming, mobile.
 - **No admin mode in PoC2** (non-goal).
 
 ## Open design questions
 
 - Whether the calendar should allow manual edits (PoC2 says no).
 - Whether memory should expire or be reviewable by the runner (PoC2 keeps it append-only and invisible).
+- Whether the bubble should stream tokens (PoC2: no; Open WebUI streams).
 - Whether a chat report of a past run should create an activity automatically (PoC2 only maps Garmin today; the coach can
   mention it, the calendar stores Garmin).

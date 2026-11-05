@@ -13,12 +13,13 @@ PoC1 is archived at `../training-planner-poc1` (git `540095a`, 842 tests, PRs #6
 | Chat | http://127.0.0.1:3010 | **Open WebUI**, unforked; the coach is the model `poc2-coach` |
 | Coach gateway | http://127.0.0.1:8090/v1 | OpenAI-compatible; memory + calendar + validation + model call |
 | Private calendar | http://127.0.0.1:8091/calendar | sessions booked by the coach, activities from Garmin; dev token `demo-token` |
+| Coach bubble | inside the calendar | floating **💬 Coach** button: quick chat without leaving the calendar; same coach, same memory, same bookings |
 
 ## Flow
 
 1. Open the chat and say anything. Chit-chat is fine.
 2. Say something training-related: goal, days, constraints. The coach replies and books sessions.
-3. Open the calendar: future days show the booked sessions; the reply carries the calendar link.
+3. Open the calendar: future days show the booked sessions; the reply carries the calendar link. Use the **💬 Coach** bubble there for quick turns.
 4. Sync Garmin on the calendar; completed activities appear on their days.
 5. Come back and ask: the coach references the remembered training and the Garmin activities without being reminded.
 
@@ -45,6 +46,8 @@ the admin config call that registers `poc2-coach`, and the first-user signup.
   the server validates, the calendar is the only artefact.
 - [`docs/adr/0002-open-webui-chat-surface.md`](docs/adr/0002-open-webui-chat-surface.md) — Open WebUI is the chat
   surface; the gateway is the model.
+- [`docs/adr/0003-in-calendar-chat-bubble.md`](docs/adr/0003-in-calendar-chat-bubble.md) — the in-calendar bubble is a
+  same-origin client of the gateway, not an iframe of Open WebUI.
 
 ## Gates
 

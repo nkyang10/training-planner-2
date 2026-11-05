@@ -113,7 +113,7 @@ async function askModel(
   }
 }
 
-function completionBody(id: string, model: string, reply: string, created: number): unknown {
+function completionBody(id: string, model: string, reply: string, created: number, meta: { sessions: number; memories: number }): unknown {
   return {
     id,
     object: "chat.completion",
@@ -121,6 +121,7 @@ function completionBody(id: string, model: string, reply: string, created: numbe
     model,
     choices: [{ index: 0, message: { role: "assistant", content: reply }, finish_reason: "stop" }],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    poc2: meta,
   };
 }
 
@@ -211,6 +212,8 @@ export function createGateway(options: GatewayOptions): Gateway {
       }
       const parsed = parseCoachTurn(raw, today);
       let reply = FALLBACK_REPLY;
+      let bookedSessions = 0;
+      let remembered = 0;
       if (parsed.ok) {
         reply = parsed.turn.reply;
         if (parsed.turn.sessions.length > 0 && options.calendarUrl !== undefined) {
@@ -219,6 +222,8 @@ export function createGateway(options: GatewayOptions): Gateway {
         for (const text of parsed.turn.memories) {
           options.store.appendMemory({ memoryId: randomUUID(), userId, text, createdAt: now() });
         }
+        remembered = parsed.turn.memories.length;
+        bookedSessions = parsed.turn.sessions.length;
         for (const draft of parsed.turn.sessions) {
           options.store.upsertSession({
             // Same day + kind + title is the same booking across turns: re-planning replaces it instead of duplicating.
@@ -251,7 +256,7 @@ export function createGateway(options: GatewayOptions): Gateway {
         response.end();
         return;
       }
-      sendJson(response, 200, completionBody(id, modelId, reply, created));
+      sendJson(response, 200, completionBody(id, modelId, reply, created, { sessions: bookedSessions, memories: remembered }));
     })().catch((error: unknown) => {
       if (!response.headersSent) {
         sendJson(response, 500, { error: { code: "gateway-failed", detail: error instanceof Error ? error.message : String(error) } });

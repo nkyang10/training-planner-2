@@ -9,6 +9,10 @@ import type { Activity, SessionKind, Store, TrainingSession } from "./types";
 
 export interface WebOptions {
   store: Store;
+  /** The coach gateway; the embedded bubble talks through this server so the browser stays same-origin. */
+  gatewayUrl?: string;
+  modelId?: string;
+  fetchImpl?: typeof fetch;
   /** token -> userId */
   tokens: Record<string, string>;
   chatUrl?: string;
@@ -53,6 +57,19 @@ function parseCookies(request: IncomingMessage): Record<string, string> {
   return cookies;
 }
 
+async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = chunk as Buffer;
+    size += buffer.length;
+    if (size > 200_000) throw new Error("request too large");
+    chunks.push(buffer);
+  }
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  return text.length === 0 ? undefined : (JSON.parse(text) as unknown);
+}
+
 async function readForm(request: IncomingMessage): Promise<URLSearchParams> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(chunk as Buffer);
@@ -92,11 +109,70 @@ function activityLine(activity: Activity): string {
 
 function layout(title: string, body: string, chatUrl: string, signedIn: boolean): string {
   const nav = signedIn
-    ? `<nav class="top"><a class="brand" href="/calendar">⚡ AI COACH CALENDAR</a><a class="chat" href="${escapeHtml(chatUrl)}">Talk to the coach →</a><a href="/logout">Sign out</a></nav>`
+    ? `<nav class="top"><a class="brand" href="/calendar">⚡ AI COACH CALENDAR</a><a class="chat" href="${escapeHtml(chatUrl)}" target="_blank" rel="noreferrer">Full chat ↗</a><a href="/logout">Sign out</a></nav>`
     : `<nav class="top"><span class="brand">⚡ AI COACH CALENDAR</span></nav>`;
+  const bubble = signedIn ? renderChatBubble() : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title><link rel="stylesheet" href="/static/app.css"></head>
-  <body>${nav}<main>${body}</main></body></html>`;
+  <body>${nav}<main>${body}</main>${bubble}</body></html>`;
+}
+
+/** The in-calendar chat bubble: same gateway, same memory, same calendar writes as the full chat. */
+function renderChatBubble(): string {
+  return `<button id="coach-bubble" type="button" aria-label="Talk to the coach">💬 Coach</button>
+  <section id="coach-panel" hidden aria-label="Coach chat">
+    <header><strong>AI Coach</strong><button id="coach-close" type="button" aria-label="Close chat">×</button></header>
+    <div id="coach-log" role="log" aria-live="polite"></div>
+    <form id="coach-form"><textarea id="coach-input" rows="2" maxlength="1000" required placeholder="Tell the coach about your training…"></textarea><button class="btn" type="submit">Send</button></form>
+  </section>
+  <script>
+  (() => {
+    const bubble = document.getElementById('coach-bubble');
+    const panel = document.getElementById('coach-panel');
+    const close = document.getElementById('coach-close');
+    const form = document.getElementById('coach-form');
+    const input = document.getElementById('coach-input');
+    const log = document.getElementById('coach-log');
+    if (!bubble || !panel || !close || !form || !input || !log) return;
+    const show = () => { panel.hidden = false; bubble.hidden = true; input.focus(); };
+    const hide = () => { panel.hidden = true; bubble.hidden = false; };
+    const add = (role, text) => {
+      const line = document.createElement('div');
+      line.className = 'bubble ' + role;
+      line.textContent = text;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+      return line;
+    };
+    bubble.addEventListener('click', show);
+    close.addEventListener('click', hide);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (text.length === 0) return;
+      add('user', text);
+      input.value = '';
+      const typing = add('coach', '…');
+      typing.classList.add('typing');
+      try {
+        const response = await fetch('/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: text }) });
+        const data = await response.json();
+        typing.remove();
+        if (!response.ok) add('error', data && data.error ? data.error.detail : 'The coach could not answer.');
+        else {
+          add('coach', data.reply);
+          if (data.sessions > 0) add('system', 'Calendar updated — refresh to see ' + data.sessions + ' new session(s).');
+        }
+      } catch {
+        typing.remove();
+        add('error', 'Network error. Try again.');
+      }
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); }
+    });
+  })();
+  </script>`;
 }
 
 function renderLogin(error?: string): string {
@@ -158,6 +234,51 @@ export function createWeb(options: WebOptions): WebApp {
         return;
       }
       const today = now().slice(0, 10);
+
+      if (url.pathname === "/chat" && method === "POST") {
+        let body: unknown;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          response.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: { detail: "invalid body" } }));
+          return;
+        }
+        const message = typeof body === "object" && body !== null && typeof (body as Record<string, unknown>)["message"] === "string"
+          ? String((body as Record<string, unknown>)["message"]).trim()
+          : "";
+        if (message.length === 0 || message.length > 1000) {
+          response.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: { detail: "message must be 1..1000 characters" } }));
+          return;
+        }
+        const gatewayUrl = options.gatewayUrl ?? "http://127.0.0.1:8090";
+        const doFetch = options.fetchImpl ?? fetch;
+        try {
+          const upstream = await doFetch(`${gatewayUrl}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-poc2-user": userId },
+            body: JSON.stringify({ model: options.modelId ?? "poc2-coach", stream: false, messages: [{ role: "user", content: message }] }),
+          });
+          const payload = (await upstream.json()) as {
+            choices?: Array<{ message?: { content?: unknown } }>;
+            poc2?: { sessions?: number };
+            error?: { detail?: string };
+          };
+          const reply = payload.choices?.[0]?.message?.content;
+          if (!upstream.ok || typeof reply !== "string") {
+            response.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+            response.end(JSON.stringify({ error: { detail: payload.error?.detail ?? `coach answered ${upstream.status}` } }));
+            return;
+          }
+          response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+          response.end(JSON.stringify({ reply, sessions: payload.poc2?.sessions ?? 0 }));
+        } catch (error) {
+          response.writeHead(502, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: { detail: error instanceof Error ? error.message : String(error) } }));
+        }
+        return;
+      }
 
       if (url.pathname === "/" || url.pathname === "/calendar") {
         const month = url.searchParams.get("month") ?? today.slice(0, 7);

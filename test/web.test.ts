@@ -107,3 +107,68 @@ describe("private calendar", () => {
     expect(handle.store.listActivities(USER)).toHaveLength(1);
   });
 });
+
+describe("in-calendar coach bubble", () => {
+  it("renders the bubble on the calendar page", async () => {
+    const { handle, web, base } = await start();
+    cleanup = async () => {
+      await web.close();
+      handle.close();
+    };
+    const page = await fetch(`${base}/calendar?month=2026-11`, { headers: { cookie: "poc2=demo-token" } });
+    const html = await page.text();
+    expect(html).toContain('id="coach-bubble"');
+    expect(html).toContain("fetch('/chat'");
+    expect(html).toContain('id="coach-panel"');
+  });
+
+  it("proxies a chat turn through the calendar origin", async () => {
+    const handle = createStore(":memory:");
+    const web = createWeb({
+      store: handle.store,
+      tokens: { "demo-token": USER },
+      chatUrl: "http://chat.test",
+      gatewayUrl: "http://gateway.test",
+      modelId: "poc2-coach",
+      now: () => `${TODAY}T08:00:00.000Z`,
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "Booked two runs." } }], poc2: { sessions: 2 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch,
+    });
+    await new Promise<void>((resolve) => web.server.listen(0, "127.0.0.1", resolve));
+    const address = web.server.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    cleanup = async () => {
+      await web.close();
+      handle.close();
+    };
+    const response = await fetch(`http://127.0.0.1:${port}/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: "poc2=demo-token" },
+      body: JSON.stringify({ message: "Plan my week" }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { reply: string; sessions: number };
+    expect(body.reply).toBe("Booked two runs.");
+    expect(body.sessions).toBe(2);
+  });
+
+  it("refuses chat without a session", async () => {
+    const { handle, web, base } = await start();
+    cleanup = async () => {
+      await web.close();
+      handle.close();
+    };
+    const response = await fetch(`${base}/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "Hi" }),
+      redirect: "manual",
+    });
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/login");
+  });
+});
+

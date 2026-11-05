@@ -36,6 +36,8 @@ const gateway = createGateway({
 const web = createWeb({
   store: handle.store,
   tokens,
+  gatewayUrl: process.env["POC2_GATEWAY_URL"] ?? "http://127.0.0.1:8090",
+  modelId: process.env["POC2_MODEL_ID"] ?? "poc2-coach",
   chatUrl: process.env["POC2_CHAT_URL"] ?? "http://127.0.0.1:3010",
   ...(garmin === undefined ? {} : { garmin }),
 });
