@@ -221,8 +221,7 @@ export function createGateway(options: GatewayOptions): Gateway {
       let calendarEvents = 0;
       const changes: Array<{ action: SessionAction; sessionId: string; fromDay: string | null; toDay: string | null; title: string; kind: SessionKind }> = [];
       const failures: string[] = [];
-      const toMirror: CalendarEventDraft[] = [];
-      const toRemove: string[] = [];
+      const affected = new Set<string>();
       if (parsed.ok) {
         reply = parsed.turn.reply;
         for (const text of parsed.turn.memories) {
@@ -244,7 +243,7 @@ export function createGateway(options: GatewayOptions): Gateway {
               createdAt: now(),
             });
             changes.push({ action: "add", sessionId, fromDay: null, toDay: draft.day, title: draft.title, kind: draft.kind });
-            toMirror.push({ sessionId, day: draft.day, title: draft.title, description: draft.note ?? `Booked by the AI coach (${draft.kind}).`, kind: draft.kind });
+            affected.add(sessionId);
             continue;
           }
           const existing = draft.sessionId === null ? undefined : options.store.getSession(userId, draft.sessionId);
@@ -255,7 +254,7 @@ export function createGateway(options: GatewayOptions): Gateway {
           if (draft.action === "remove") {
             options.store.deleteSession(userId, existing.sessionId);
             changes.push({ action: "remove", sessionId: existing.sessionId, fromDay: existing.day, toDay: null, title: existing.title, kind: existing.kind });
-            toRemove.push(existing.sessionId);
+            affected.add(existing.sessionId);
             continue;
           }
           options.store.upsertSession({
@@ -270,7 +269,7 @@ export function createGateway(options: GatewayOptions): Gateway {
             createdAt: now(),
           });
           changes.push({ action: "update", sessionId: existing.sessionId, fromDay: existing.day, toDay: draft.day, title: draft.title, kind: draft.kind });
-          toMirror.push({ sessionId: existing.sessionId, day: draft.day, title: draft.title, description: draft.note ?? `Changed by the AI coach (${draft.kind}).`, kind: draft.kind });
+          affected.add(existing.sessionId);
         }
         if (failures.length > 0) {
           reply = `${reply}\n\nNote: I could not find ${failures.length === 1 ? "one session" : `${failures.length} sessions`} you asked me to change, so that part was not applied.`;
@@ -279,11 +278,31 @@ export function createGateway(options: GatewayOptions): Gateway {
           reply = `${reply}\n\nYour calendar: ${options.calendarUrl}`;
         }
       }
+      // A batch may touch the same session more than once (move then delete, delete then re-add). Mirror the FINAL
+      // state of every affected session, not each intermediate action, so the native calendar cannot end up stale.
+      const toMirror: CalendarEventDraft[] = [];
+      const toRemove: string[] = [];
+      for (const sessionId of affected) {
+        const final = options.store.getSession(userId, sessionId);
+        if (final === undefined) {
+          toRemove.push(sessionId);
+        } else {
+          toMirror.push({
+            sessionId,
+            day: final.day,
+            title: final.title,
+            description: final.note ?? `Booked by the AI coach (${final.kind}).`,
+            kind: final.kind,
+          });
+        }
+      }
       if (options.calendarMirror !== undefined && (toMirror.length > 0 || toRemove.length > 0)) {
         try {
           const mirrored = await options.calendarMirror.ensureEvents(toMirror);
           const removed = await options.calendarMirror.removeEvents(toRemove);
-          calendarEvents = mirrored.created + mirrored.updated + removed;
+          const valid = options.store.listSessions(userId, today, addDays(today, 56)).map((session) => session.sessionId);
+          const pruned = options.calendarMirror.prune === undefined ? 0 : await options.calendarMirror.prune(valid);
+          calendarEvents = mirrored.created + mirrored.updated + removed + pruned;
         } catch {
           // The native calendar is a view; a mirror failure must not lose the booking in PoC2's own store.
           calendarEvents = 0;

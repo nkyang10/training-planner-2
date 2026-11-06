@@ -27,6 +27,9 @@ function fakeFetch(): typeof fetch {
     if (url.endsWith("/api/v1/calendars/events/create")) {
       return new Response(JSON.stringify({ id: "event-b" }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    if (url.includes("/api/v1/calendars/events/event-a/delete")) {
+      return new Response(JSON.stringify({ status: true }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     if (url.includes("/api/v1/calendars/events/event-a/update")) {
       return new Response(JSON.stringify({ id: "event-a" }), { status: 200, headers: { "content-type": "application/json" } });
     }
@@ -78,3 +81,21 @@ describe("Open WebUI native calendar mirror", () => {
     ).rejects.toBeInstanceOf(OpenWebUiCalendarError);
   });
 });
+
+describe("stale native event pruning", () => {
+  it("deletes native events whose session is no longer in PoC2", async () => {
+    calls.length = 0;
+    const mirror = createOpenWebUiCalendar({
+      baseUrl: BASE,
+      email: "owner@example.com",
+      password: "secret",
+      fetchImpl: fakeFetch(),
+    });
+    const deleted = await mirror.prune?.(["session:other"]);
+    expect(deleted).toBe(1);
+    expect(calls.some((call) => call.url.includes("/event-a/delete") && call.method === "DELETE")).toBe(true);
+    const kept = await mirror.prune?.(["session:a"]);
+    expect(kept).toBe(0);
+  });
+});
+

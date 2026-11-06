@@ -32,6 +32,8 @@ export interface CalendarMirror {
   ensureEvents(events: readonly CalendarEventDraft[]): Promise<CalendarMirrorResult>;
   /** Delete the native events that mirror the given PoC2 session ids; returns how many were deleted. */
   removeEvents(sessionIds: readonly string[]): Promise<number>;
+  /** Delete native events whose session no longer exists in PoC2 (stale mirrors); returns how many were deleted. */
+  prune?(validSessionIds: readonly string[]): Promise<number>;
 }
 
 export class OpenWebUiCalendarError extends Error {
@@ -144,8 +146,26 @@ export function createOpenWebUiCalendar(options: OpenWebUiCalendarOptions): Cale
     return deleted;
   };
 
+  const pruneStale = async (validSessionIds: readonly string[]): Promise<number> => {
+    await ensureToken();
+    const today = new Date();
+    const from = new Date(today.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const to = new Date(today.getTime() + 180 * 86_400_000).toISOString().slice(0, 10);
+    const existing = await listEvents(from, to);
+    const valid = new Set(validSessionIds);
+    let deleted = 0;
+    for (const event of existing) {
+      const sessionId = event.meta?.["poc2_session_id"];
+      if (typeof sessionId !== "string" || valid.has(sessionId)) continue;
+      const response = await request(`/api/v1/calendars/events/${encodeURIComponent(event.id)}/delete`, { method: "DELETE" });
+      if (response.ok) deleted += 1;
+    }
+    return deleted;
+  };
+
   return {
     removeEvents: removeByIds,
+    prune: pruneStale,
     async ensureEvents(events: readonly CalendarEventDraft[]): Promise<CalendarMirrorResult> {
       if (events.length === 0) return { created: 0, updated: 0, skipped: 0 };
       for (const event of events) {

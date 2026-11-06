@@ -44,6 +44,9 @@ animation: the session chip flies in an arc to its new day (green pulse) or into
 warm flash and a short shake. `add` pops the chip into the target day. The grid is updated before the animation, so the end state
 is always correct even if the animation is interrupted.
 
+A batch animates every change: chips leave in a 140 ms stagger, so moving several days reads as one coordinated edit rather
+than a single flying chip.
+
 ![Calendar CRUD animation: a session chip flying into the bin while the deleted day pulses](calendar-crud-animation.png)
 
 ## Surfaces

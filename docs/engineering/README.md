@@ -62,9 +62,10 @@ lose the booking in PoC2's SQLite.
 ## Schedule CRUD and prompt history
 
 `parseCoachTurn` accepts `sessions[]` entries with `action: add | update | remove`; update/remove require the `sessionId`
-listed in the prompt facts. The gateway applies them (add/upsert, move/upsert by id, delete), records `poc2.changes` for the UI,
-and mirrors adds/moves/deletes into the native Open WebUI calendar. `buildCoachPrompt` includes the last 10 turns as
-"Conversation so far", in addition to the chat history sent to the model.
+listed in the prompt facts. The gateway applies the whole batch in order (add/upsert, move/upsert by id, delete), records
+`poc2.changes` for the UI, then mirrors the **final state** of every affected session and prunes native events whose session
+no longer exists. `buildCoachPrompt` includes the last 10 turns as "Conversation so far" plus the existing schedule with
+session ids, and asks for a reviewed batch rather than a single action.
 
 ## Calendar auto-refresh
 

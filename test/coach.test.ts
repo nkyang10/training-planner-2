@@ -134,6 +134,7 @@ describe("coach schedule actions", () => {
       question: "What next?",
     });
     expect(prompt).toContain("Conversation so far");
+    expect(prompt).toContain("several actions");
     expect(prompt).toContain("Runner: I ran 5 km yesterday");
     expect(prompt).toContain("Coach: Nice, keep it easy");
   });

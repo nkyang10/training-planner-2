@@ -47,7 +47,7 @@ the admin config call that registers `poc2-coach`, and the first-user signup.
 
 ## Schedule CRUD
 
-The coach answers with `action: add | update | remove`. `update`/`remove` carry the existing `sessionId` from the facts; the gateway applies them to SQLite and mirrors the change to the native Open WebUI calendar (move = update the event, delete = delete it). A missing session id changes nothing and the reply says so. The conversation so far is part of the prompt, so a follow-up like "what did I delete?" works.
+The coach answers with `action: add | update | remove`. `update`/`remove` carry the existing `sessionId` from the facts. **One turn may contain many actions across many days** (move two runs, delete one, add one); the gateway applies the batch, then mirrors the **final state** of every affected session to the native Open WebUI calendar and prunes native events whose session no longer exists. A missing session id changes nothing and the reply says so. The conversation so far is part of the prompt, so a follow-up like "what did I delete?" works.
 
 ## Design decisions
 

@@ -198,3 +198,98 @@ describe("coach schedule CRUD", () => {
   });
 });
 
+describe("batched CRUD across multiple days", () => {
+  const seedTwo = (handle: ReturnType<typeof createStore>) => {
+    for (const [id, day, title] of [["session:a", "2026-11-06", "Easy 5 km"], ["session:b", "2026-11-07", "Long 8 km"]] as const) {
+      handle.store.upsertSession({
+        sessionId: id,
+        userId: USER,
+        day,
+        title,
+        kind: day.endsWith("07") ? "long" : "easy",
+        distanceKm: 5,
+        durationMin: 35,
+        note: null,
+        createdAt: `${TODAY}T00:00:00.000Z`,
+      });
+    }
+  };
+
+  it("moves two days in one turn", async () => {
+    const turn = {
+      reply: "Moved both.",
+      sessions: [
+        { action: "update", sessionId: "session:a", day: "2026-11-08", title: "Easy 5 km", kind: "easy", distanceKm: 5, durationMin: 35 },
+        { action: "update", sessionId: "session:b", day: "2026-11-09", title: "Long 8 km", kind: "long", distanceKm: 8, durationMin: 55 },
+      ],
+    };
+    const { handle, gateway, url } = await base(modelFetch(turn));
+    cleanup = async () => { await gateway.close(); handle.close(); };
+    seedTwo(handle);
+    const response = await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Move both days" }] });
+    const body = (await response.json()) as { poc2: { changes: Array<Record<string, unknown>> } };
+    expect(body.poc2.changes).toHaveLength(2);
+    expect(handle.store.listSessions(USER, "2026-11-06", "2026-11-09").map((session) => session.day)).toEqual(["2026-11-08", "2026-11-09"]);
+  });
+
+  it("moves one day, removes another and adds a third in the same turn", async () => {
+    let mirrored: string[] = [];
+    let removed: string[] = [];
+    const turn = {
+      reply: "Batch done.",
+      sessions: [
+        { action: "update", sessionId: "session:a", day: "2026-11-08", title: "Easy 5 km", kind: "easy", distanceKm: 5, durationMin: 35 },
+        { action: "remove", sessionId: "session:b" },
+        { action: "add", day: "2026-11-10", title: "Easy 4 km", kind: "easy", distanceKm: 4, durationMin: 30 },
+      ],
+    };
+    const { handle, gateway, url } = await base(modelFetch(turn), {
+      async ensureEvents(events) {
+        mirrored = events.map((event) => event.sessionId);
+        return { created: events.length, updated: 0, skipped: 0 };
+      },
+      async removeEvents(sessionIds) {
+        removed = [...sessionIds];
+        return sessionIds.length;
+      },
+    });
+    cleanup = async () => { await gateway.close(); handle.close(); };
+    seedTwo(handle);
+    const response = await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Batch" }] });
+    const body = (await response.json()) as { poc2: { changes: Array<Record<string, unknown>> } };
+    expect(body.poc2.changes).toHaveLength(3);
+    expect(handle.store.getSession(USER, "session:b")).toBeUndefined();
+    expect(handle.store.listSessions(USER, "2026-11-01", "2026-11-30").map((session) => session.day)).toEqual(["2026-11-08", "2026-11-10"]);
+    expect(mirrored).toHaveLength(2);
+    expect(removed).toEqual(["session:b"]);
+  });
+
+  it("mirrors the final state when one batch moves then deletes the same session", async () => {
+    let mirrored = 0;
+    let removed: string[] = [];
+    const turn = {
+      reply: "Moved then deleted.",
+      sessions: [
+        { action: "update", sessionId: "session:a", day: "2026-11-08", title: "Easy 5 km", kind: "easy", distanceKm: 5, durationMin: 35 },
+        { action: "remove", sessionId: "session:a" },
+      ],
+    };
+    const { handle, gateway, url } = await base(modelFetch(turn), {
+      async ensureEvents(events) {
+        mirrored = events.length;
+        return { created: events.length, updated: 0, skipped: 0 };
+      },
+      async removeEvents(sessionIds) {
+        removed = [...sessionIds];
+        return sessionIds.length;
+      },
+    });
+    cleanup = async () => { await gateway.close(); handle.close(); };
+    seedTwo(handle);
+    await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Move then delete" }] });
+    expect(handle.store.getSession(USER, "session:a")).toBeUndefined();
+    expect(mirrored).toBe(0);
+    expect(removed).toEqual(["session:a"]);
+  });
+});
+

@@ -191,11 +191,12 @@ function renderChatBubble(): string {
       document.body.appendChild(overlay);
       document.body.appendChild(trash);
       document.body.classList.add('calendar-fx-active');
-      for (const item of before) {
+      for (const [index, item] of before.entries()) {
+        setTimeout(() => {
         const change = item.change;
         const to = change.toDay ? rectOf(change.toDay) : null;
         const start = item.from || to;
-        if (!start) continue;
+        if (!start) return;
         const ghost = document.createElement('span');
         ghost.className = 'fx-ghost session kind-' + change.kind;
         ghost.textContent = change.title || change.kind;
@@ -226,12 +227,13 @@ function renderChatBubble(): string {
           target.classList.add(change.action === 'remove' ? 'fx-delete' : 'fx-land');
           setTimeout(() => target.classList.remove('fx-delete', 'fx-land'), 1300);
         }
+        }, index * 140);
       }
       setTimeout(() => {
         overlay.remove();
         trash.remove();
         document.body.classList.remove('calendar-fx-active');
-      }, 1200);
+      }, 1200 + before.length * 140);
     };
     bubble.addEventListener('click', show);
     close.addEventListener('click', hide);

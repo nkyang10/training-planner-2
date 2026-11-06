@@ -124,6 +124,7 @@ describe("in-calendar coach bubble", () => {
     expect(html).toContain('data-day="2026-11-06"');
     expect(html).toContain("refreshCalendar");
     expect(html).toContain("animateChanges");
+    expect(html).toContain("before.length * 140");
   });
 
   it("proxies a chat turn through the calendar origin", async () => {
