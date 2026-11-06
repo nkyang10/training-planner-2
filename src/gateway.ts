@@ -8,7 +8,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { buildCoachHistory, buildCoachPrompt, parseCoachTurn } from "./coach";
-import type { CalendarMirror } from "./openwebui-calendar";
+import type { SessionAction } from "./coach";
+import type { SessionKind } from "./types";
+import type { CalendarEventDraft, CalendarMirror } from "./openwebui-calendar";
 import type { Store } from "./types";
 
 export interface GatewayOptions {
@@ -116,7 +118,7 @@ async function askModel(
   }
 }
 
-function completionBody(id: string, model: string, reply: string, created: number, meta: { sessions: number; memories: number; calendarEvents: number }): unknown {
+function completionBody(id: string, model: string, reply: string, created: number, meta: { sessions: number; memories: number; calendarEvents: number; changes: unknown[] }): unknown {
   return {
     id,
     object: "chat.completion",
@@ -215,22 +217,49 @@ export function createGateway(options: GatewayOptions): Gateway {
       }
       const parsed = parseCoachTurn(raw, today);
       let reply = FALLBACK_REPLY;
-      let bookedSessions = 0;
       let remembered = 0;
+      let calendarEvents = 0;
+      const changes: Array<{ action: SessionAction; sessionId: string; fromDay: string | null; toDay: string | null; title: string; kind: SessionKind }> = [];
+      const failures: string[] = [];
+      const toMirror: CalendarEventDraft[] = [];
+      const toRemove: string[] = [];
       if (parsed.ok) {
         reply = parsed.turn.reply;
-        if (parsed.turn.sessions.length > 0 && options.calendarUrl !== undefined) {
-          reply = `${reply}\n\nYour calendar: ${options.calendarUrl}`;
-        }
         for (const text of parsed.turn.memories) {
           options.store.appendMemory({ memoryId: randomUUID(), userId, text, createdAt: now() });
         }
         remembered = parsed.turn.memories.length;
-        bookedSessions = parsed.turn.sessions.length;
         for (const draft of parsed.turn.sessions) {
+          if (draft.action === "add") {
+            const sessionId = `session:${createHash("sha256").update(`${userId}:${draft.day}:${draft.kind}:${draft.title}`).digest("hex").slice(0, 32)}`;
+            options.store.upsertSession({
+              sessionId,
+              userId,
+              day: draft.day,
+              title: draft.title,
+              kind: draft.kind,
+              distanceKm: draft.distanceKm,
+              durationMin: draft.durationMin,
+              note: draft.note,
+              createdAt: now(),
+            });
+            changes.push({ action: "add", sessionId, fromDay: null, toDay: draft.day, title: draft.title, kind: draft.kind });
+            toMirror.push({ sessionId, day: draft.day, title: draft.title, description: draft.note ?? `Booked by the AI coach (${draft.kind}).`, kind: draft.kind });
+            continue;
+          }
+          const existing = draft.sessionId === null ? undefined : options.store.getSession(userId, draft.sessionId);
+          if (existing === undefined) {
+            failures.push(draft.title.length === 0 ? (draft.sessionId ?? "unknown session") : draft.title);
+            continue;
+          }
+          if (draft.action === "remove") {
+            options.store.deleteSession(userId, existing.sessionId);
+            changes.push({ action: "remove", sessionId: existing.sessionId, fromDay: existing.day, toDay: null, title: existing.title, kind: existing.kind });
+            toRemove.push(existing.sessionId);
+            continue;
+          }
           options.store.upsertSession({
-            // Same day + kind + title is the same booking across turns: re-planning replaces it instead of duplicating.
-            sessionId: `session:${createHash("sha256").update(`${userId}:${draft.day}:${draft.kind}:${draft.title}`).digest("hex").slice(0, 32)}`,
+            sessionId: existing.sessionId,
             userId,
             day: draft.day,
             title: draft.title,
@@ -240,21 +269,21 @@ export function createGateway(options: GatewayOptions): Gateway {
             note: draft.note,
             createdAt: now(),
           });
+          changes.push({ action: "update", sessionId: existing.sessionId, fromDay: existing.day, toDay: draft.day, title: draft.title, kind: draft.kind });
+          toMirror.push({ sessionId: existing.sessionId, day: draft.day, title: draft.title, description: draft.note ?? `Changed by the AI coach (${draft.kind}).`, kind: draft.kind });
+        }
+        if (failures.length > 0) {
+          reply = `${reply}\n\nNote: I could not find ${failures.length === 1 ? "one session" : `${failures.length} sessions`} you asked me to change, so that part was not applied.`;
+        }
+        if (changes.length > 0 && options.calendarUrl !== undefined) {
+          reply = `${reply}\n\nYour calendar: ${options.calendarUrl}`;
         }
       }
-      let calendarEvents = 0;
-      if (parsed.ok && parsed.turn.sessions.length > 0 && options.calendarMirror !== undefined) {
+      if (options.calendarMirror !== undefined && (toMirror.length > 0 || toRemove.length > 0)) {
         try {
-          const mirrored = await options.calendarMirror.ensureEvents(
-            parsed.turn.sessions.map((draft) => ({
-              sessionId: `session:${createHash("sha256").update(`${userId}:${draft.day}:${draft.kind}:${draft.title}`).digest("hex").slice(0, 32)}`,
-              day: draft.day,
-              title: draft.title,
-              description: draft.note ?? `Booked by the AI coach (${draft.kind}).`,
-              kind: draft.kind,
-            })),
-          );
-          calendarEvents = mirrored.created + mirrored.updated;
+          const mirrored = await options.calendarMirror.ensureEvents(toMirror);
+          const removed = await options.calendarMirror.removeEvents(toRemove);
+          calendarEvents = mirrored.created + mirrored.updated + removed;
         } catch {
           // The native calendar is a view; a mirror failure must not lose the booking in PoC2's own store.
           calendarEvents = 0;
@@ -277,7 +306,7 @@ export function createGateway(options: GatewayOptions): Gateway {
         response.end();
         return;
       }
-      sendJson(response, 200, completionBody(id, modelId, reply, created, { sessions: bookedSessions, memories: remembered, calendarEvents }));
+      sendJson(response, 200, completionBody(id, modelId, reply, created, { sessions: changes.length, memories: remembered, calendarEvents, changes }));
     })().catch((error: unknown) => {
       if (!response.headersSent) {
         sendJson(response, 500, { error: { code: "gateway-failed", detail: error instanceof Error ? error.message : String(error) } });

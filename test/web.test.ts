@@ -123,6 +123,7 @@ describe("in-calendar coach bubble", () => {
     expect(html).toContain('data-month="2026-11"');
     expect(html).toContain('data-day="2026-11-06"');
     expect(html).toContain("refreshCalendar");
+    expect(html).toContain("animateChanges");
   });
 
   it("proxies a chat turn through the calendar origin", async () => {
@@ -135,7 +136,7 @@ describe("in-calendar coach bubble", () => {
       modelId: "poc2-coach",
       now: () => `${TODAY}T08:00:00.000Z`,
       fetchImpl: (async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content: "Booked two runs." } }], poc2: { sessions: 2 } }), {
+        new Response(JSON.stringify({ choices: [{ message: { content: "Booked two runs." } }], poc2: { sessions: 2, changes: [{ action: "add", toDay: "2026-11-06", title: "Easy 5 km", kind: "easy" }] } }), {
           status: 200,
           headers: { "content-type": "application/json" },
         })) as unknown as typeof fetch,
@@ -153,9 +154,10 @@ describe("in-calendar coach bubble", () => {
       body: JSON.stringify({ message: "Plan my week" }),
     });
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { reply: string; sessions: number };
+    const body = (await response.json()) as { reply: string; sessions: number; changes: unknown[] };
     expect(body.reply).toBe("Booked two runs.");
     expect(body.sessions).toBe(2);
+    expect(body.changes).toHaveLength(1);
   });
 
   it("refuses chat without a session", async () => {

@@ -17,7 +17,7 @@ const modelFetch = (content: unknown): typeof fetch =>
       headers: { "content-type": "application/json" },
     })) as unknown as typeof fetch;
 
-const base = async (fetchImpl: typeof fetch, calendarMirror?: { ensureEvents(events: readonly { sessionId: string; day: string; title: string; description: string; kind: string }[]): Promise<{ created: number; updated: number; skipped: number }> }) => {
+const base = async (fetchImpl: typeof fetch, calendarMirror?: { ensureEvents(events: readonly { sessionId: string; day: string; title: string; description: string; kind: string }[]): Promise<{ created: number; updated: number; skipped: number }>; removeEvents(sessionIds: readonly string[]): Promise<number> }) => {
   const handle = createStore(":memory:");
   const gateway = createGateway({
     store: handle.store,
@@ -131,6 +131,9 @@ describe("native calendar mirror metadata", () => {
         mirrored = events.length;
         return { created: events.length, updated: 0, skipped: 0 };
       },
+      async removeEvents() {
+        return 0;
+      },
     });
     cleanup = async () => {
       await gateway.close();
@@ -141,6 +144,57 @@ describe("native calendar mirror metadata", () => {
     expect(body.choices[0]?.message.content).toContain("Booked an easy Friday");
     expect(body.poc2.calendarEvents).toBe(1);
     expect(mirrored).toBe(1);
+  });
+});
+
+describe("coach schedule CRUD", () => {
+  const seed = (handle: ReturnType<typeof createStore>) => {
+    handle.store.upsertSession({
+      sessionId: "session:a",
+      userId: USER,
+      day: "2026-11-06",
+      title: "Easy 5 km",
+      kind: "easy",
+      distanceKm: 5,
+      durationMin: 35,
+      note: null,
+      createdAt: `${TODAY}T00:00:00.000Z`,
+    });
+  };
+
+  it("moves a session with action=update and reports the change", async () => {
+    const turn = { reply: "Moved it.", sessions: [{ action: "update", sessionId: "session:a", day: "2026-11-07", title: "Easy 4 km", kind: "easy", distanceKm: 4, durationMin: 30 }] };
+    const { handle, gateway, url } = await base(modelFetch(turn));
+    cleanup = async () => { await gateway.close(); handle.close(); };
+    seed(handle);
+    const response = await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Move Friday" }] });
+    const body = (await response.json()) as { poc2: { changes: Array<Record<string, unknown>> } };
+    expect(body.poc2.changes[0]).toMatchObject({ action: "update", fromDay: "2026-11-06", toDay: "2026-11-07" });
+    const sessions = handle.store.listSessions(USER, TODAY, "2026-12-31");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.day).toBe("2026-11-07");
+    expect(sessions[0]?.title).toBe("Easy 4 km");
+  });
+
+  it("deletes a session with action=remove", async () => {
+    const turn = { reply: "Removed Sunday.", sessions: [{ action: "remove", sessionId: "session:a" }] };
+    const { handle, gateway, url } = await base(modelFetch(turn));
+    cleanup = async () => { await gateway.close(); handle.close(); };
+    seed(handle);
+    const response = await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Remove Sunday" }] });
+    const body = (await response.json()) as { poc2: { changes: Array<Record<string, unknown>> } };
+    expect(body.poc2.changes[0]).toMatchObject({ action: "remove", fromDay: "2026-11-06" });
+    expect(handle.store.listSessions(USER, TODAY, "2026-12-31")).toHaveLength(0);
+  });
+
+  it("does not invent a change when the session id is unknown", async () => {
+    const turn = { reply: "Changed it.", sessions: [{ action: "update", sessionId: "session:missing", day: "2026-11-07", title: "Easy 4 km", kind: "easy", distanceKm: 4, durationMin: 30 }] };
+    const { handle, gateway, url } = await base(modelFetch(turn));
+    cleanup = async () => { await gateway.close(); handle.close(); };
+    const response = await post(url, { model: "poc2-coach", messages: [{ role: "user", content: "Change it" }] });
+    const body = (await response.json()) as { choices: Array<{ message: { content: string } }> };
+    expect(body.choices[0]?.message.content).toContain("could not find");
+    expect(handle.store.listSessions(USER, TODAY, "2026-12-31")).toHaveLength(0);
   });
 });
 

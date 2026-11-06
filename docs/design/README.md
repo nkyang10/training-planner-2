@@ -37,6 +37,15 @@ cells in place, so the grid updates without a page reload.
 | A rejected model turn changes nothing | a hallucination is visible, never silent |
 | No diagnosis, no calories, clinician referral on pain | health humility in the prompt |
 
+## Schedule changes animate
+
+When the coach emits `update` or `remove`, the bubble first captures the old day cells, refreshes the grid, then plays a page-wide
+animation: the session chip flies in an arc to its new day (green pulse) or into a bin (red pulse, trash pop), with a full-page
+warm flash and a short shake. `add` pops the chip into the target day. The grid is updated before the animation, so the end state
+is always correct even if the animation is interrupted.
+
+![Calendar CRUD animation: a session chip flying into the bin while the deleted day pulses](calendar-crud-animation.png)
+
 ## Surfaces
 
 - **Calendar** (PoC2 server): month grid, day detail, Garmin sync button, floating coach bubble, link to full chat.

@@ -20,7 +20,7 @@ PoC1 is archived at `../training-planner-poc1` (git `540095a`, 842 tests, PRs #6
 
 1. Open the chat and say anything. Chit-chat is fine.
 2. Say something training-related: goal, days, constraints. The coach replies and books sessions.
-3. Open the calendar: future days show the booked sessions; the reply carries the calendar link. Use the **💬 Coach** bubble there for quick turns — when it books, the month grid updates **in place**, no reload. In Open WebUI, **sidebar → Calendar** shows the same sessions natively.
+3. Open the calendar: future days show the booked sessions; the reply carries the calendar link. Use the **💬 Coach** bubble there for quick turns — when it adds, moves or deletes a session, the month grid updates **in place** with a page-wide animation (the chip flies to its new day, or into the bin). In Open WebUI, **sidebar → Calendar** shows the same sessions natively.
 4. Sync Garmin on the calendar; completed activities appear on their days.
 5. Come back and ask: the coach references the remembered training and the Garmin activities without being reminded.
 
@@ -44,6 +44,10 @@ npx tsx src/index.ts
 
 Open WebUI is a container; see [`docs/engineering/open-webui.md`](docs/engineering/open-webui.md) for the exact command,
 the admin config call that registers `poc2-coach`, and the first-user signup.
+
+## Schedule CRUD
+
+The coach answers with `action: add | update | remove`. `update`/`remove` carry the existing `sessionId` from the facts; the gateway applies them to SQLite and mirrors the change to the native Open WebUI calendar (move = update the event, delete = delete it). A missing session id changes nothing and the reply says so. The conversation so far is part of the prompt, so a follow-up like "what did I delete?" works.
 
 ## Design decisions
 

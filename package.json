@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "PoC2 \u2014 the conversation is the product: an LLM coach that remembers and books training into a private calendar.",
+  "description": "PoC2 — the conversation is the product: an LLM coach that remembers and books training into a private calendar.",
   "scripts": {
     "dev": "tsx src/index.ts",
     "test": "vitest run",

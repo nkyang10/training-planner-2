@@ -59,6 +59,13 @@ After a validated turn books sessions, the gateway creates or updates one all-da
 calendar. Events carry `meta.poc2_session_id`, so re-planning updates instead of duplicating. A mirror failure does not
 lose the booking in PoC2's SQLite.
 
+## Schedule CRUD and prompt history
+
+`parseCoachTurn` accepts `sessions[]` entries with `action: add | update | remove`; update/remove require the `sessionId`
+listed in the prompt facts. The gateway applies them (add/upsert, move/upsert by id, delete), records `poc2.changes` for the UI,
+and mirrors adds/moves/deletes into the native Open WebUI calendar. `buildCoachPrompt` includes the last 10 turns as
+"Conversation so far", in addition to the chat history sent to the model.
+
 ## Calendar auto-refresh
 
 `GET /calendar/data?month=YYYY-MM` returns `{month, days: {day: {sessions, activities}}}` for the signed-in runner.

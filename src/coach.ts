@@ -13,7 +13,12 @@ const MAX_TITLE_CHARS = 80;
 const MAX_NOTE_CHARS = 280;
 const HORIZON_DAYS = 56;
 
+export type SessionAction = "add" | "update" | "remove";
+
 export interface SessionDraft {
+  action: SessionAction;
+  /** The existing session an update/remove targets; null for an add. */
+  sessionId: string | null;
   day: string;
   title: string;
   kind: SessionKind;
@@ -62,9 +67,10 @@ export const COACH_RULES: readonly string[] = [
   "You are the runner's AI coach. Talk naturally, one turn at a time, in the runner's language: if the latest message contains Chinese characters, reply in Traditional Chinese; otherwise reply in English.",
   "Proactively remember facts about the runner that help you coach them: goals, history, constraints, preferences, injuries, schedule. Do not ask the runner to curate or approve memories.",
   "When the runner says something training-related, build or adjust a periodic training system and book the future sessions. Chit-chat is fine; notice the training intent inside it.",
-  "Only book sessions for today or later, never a past day, never more than 56 days ahead. Keep it realistic: at most 14 sessions in one answer.",
+  "Use action=add for a new booking, action=update with the existing sessionId to change or move a booking, action=remove with the existing sessionId to delete one. Only say you changed the schedule when you emitted update or remove; adding a session is not a change.",
+  "Only book sessions for today or later, never a past day, never more than 56 days ahead. Keep it realistic: at most 14 actions in one answer.",
   "Never diagnose, prescribe calories or weight, or guarantee a result. Pain or medical topics end with a clinician referral.",
-  "Answer with exactly one JSON object: {\"reply\": string, \"memories\": string[], \"sessions\": [{\"day\": \"YYYY-MM-DD\", \"title\": string, \"kind\": \"easy\"|\"long\"|\"interval\"|\"tempo\"|\"rest\"|\"cross\"|\"race\", \"distanceKm\": number|null, \"durationMin\": number|null, \"note\": string|null}]}",
+  "Answer with exactly one JSON object: {\"reply\": string, \"memories\": string[], \"sessions\": [{\"action\": \"add\"|\"update\"|\"remove\", \"sessionId\": string|null, \"day\": \"YYYY-MM-DD\", \"title\": string, \"kind\": \"easy\"|\"long\"|\"interval\"|\"tempo\"|\"rest\"|\"cross\"|\"race\", \"distanceKm\": number|null, \"durationMin\": number|null, \"note\": string|null}]}",
   "The reply is what the runner reads: warm, specific, and it says what you booked when you booked it. Never call the runner's message garbled; if the intent is unclear, ask one short clarifying question.",
 ];
 
@@ -73,6 +79,7 @@ export function buildCoachPrompt(input: CoachPromptInput): string {
     today: input.today,
     remembered: input.memories.map((memory) => memory.text),
     upcomingSessions: input.sessions.map((session) => ({
+      sessionId: session.sessionId,
       day: session.day,
       title: session.title,
       kind: session.kind,
@@ -88,7 +95,11 @@ export function buildCoachPrompt(input: CoachPromptInput): string {
       avgHr: activity.avgHr,
     })),
   };
-  return `${COACH_RULES.join("\n")}\n\nWhat you know about this runner (JSON):\n${JSON.stringify(facts)}\n\nThe runner's latest message:\n${input.question}`;
+  const conversation = input.history
+    .slice(-10)
+    .map((message) => `${message.role === "user" ? "Runner" : "Coach"}: ${message.text}`)
+    .join("\n");
+  return `${COACH_RULES.join("\n")}\n\nWhat you know about this runner (JSON):\n${JSON.stringify(facts)}\n\nConversation so far (oldest first; use it as context):\n${conversation.length === 0 ? "(this is the first turn)" : conversation}\n\nThe runner's latest message:\n${input.question}`;
 }
 
 export function buildCoachHistory(input: CoachPromptInput): Array<{ role: "user" | "assistant"; content: string }> {
@@ -130,16 +141,27 @@ export function parseCoachTurn(raw: unknown, today: string): ParseResult {
   const horizonEnd = addDays(today, HORIZON_DAYS);
   for (const item of rawSessions) {
     if (!isObject(item)) return { ok: false, code: "invalid-session", detail: "each session must be an object" };
+    const actionValue = item["action"] === undefined ? "add" : item["action"];
+    if (actionValue !== "add" && actionValue !== "update" && actionValue !== "remove") {
+      return { ok: false, code: "invalid-action", detail: `unknown action: ${String(actionValue)}` };
+    }
+    const action = actionValue as SessionAction;
+    const sessionId = typeof item["sessionId"] === "string" && item["sessionId"].trim().length > 0 ? item["sessionId"].trim() : null;
+    if (action !== "add" && sessionId === null) {
+      return { ok: false, code: "missing-session-id", detail: `${action} needs the existing sessionId` };
+    }
     const day = typeof item["day"] === "string" ? item["day"] : "";
-    if (!ISO_DAY.test(day)) return { ok: false, code: "invalid-session-day", detail: `not an ISO day: ${day}` };
-    if (day < today) return { ok: false, code: "past-session", detail: `the past cannot be booked: ${day}` };
-    if (day > horizonEnd) return { ok: false, code: "session-too-far", detail: `beyond ${horizonEnd}: ${day}` };
+    if (action !== "remove") {
+      if (!ISO_DAY.test(day)) return { ok: false, code: "invalid-session-day", detail: `not an ISO day: ${day}` };
+      if (day < today) return { ok: false, code: "past-session", detail: `the past cannot be booked: ${day}` };
+      if (day > horizonEnd) return { ok: false, code: "session-too-far", detail: `beyond ${horizonEnd}: ${day}` };
+    }
     const title = typeof item["title"] === "string" ? item["title"].trim() : "";
-    if (title.length === 0 || title.length > MAX_TITLE_CHARS) {
+    if (action !== "remove" && (title.length === 0 || title.length > MAX_TITLE_CHARS)) {
       return { ok: false, code: "invalid-session-title", detail: "title must be 1..80 characters" };
     }
     const kind = item["kind"];
-    if (typeof kind !== "string" || !(SESSION_KINDS as readonly string[]).includes(kind)) {
+    if (action !== "remove" && (typeof kind !== "string" || !(SESSION_KINDS as readonly string[]).includes(kind))) {
       return { ok: false, code: "invalid-session-kind", detail: `unknown kind: ${String(kind)}` };
     }
     const distanceKm = numberOrNull(item["distanceKm"], 0, 60);
@@ -151,9 +173,11 @@ export function parseCoachTurn(raw: unknown, today: string): ParseResult {
       return { ok: false, code: "invalid-note", detail: "note must be a string of at most 280 characters or null" };
     }
     sessions.push({
+      action,
+      sessionId,
       day,
       title,
-      kind: kind as SessionKind,
+      kind: (typeof kind === "string" ? kind : "easy") as SessionKind,
       distanceKm,
       durationMin,
       note: typeof noteValue === "string" && noteValue.trim().length > 0 ? noteValue.trim() : null,

@@ -53,7 +53,10 @@ export interface Store {
   appendMemory(memory: Memory): void;
   listMemories(userId: string, limit?: number): Memory[];
   listSessions(userId: string, fromDay: string, toDay: string): TrainingSession[];
+  getSession(userId: string, sessionId: string): TrainingSession | undefined;
   upsertSession(session: TrainingSession): void;
+  /** Remove one booked session (a coach "remove" action); returns whether a row was deleted. */
+  deleteSession(userId: string, sessionId: string): boolean;
   /** Replace future sessions only; past sessions are never touched. */
   replaceFutureSessions(userId: string, fromDay: string, sessions: readonly TrainingSession[]): void;
   listActivities(userId: string, limit?: number): Activity[];

@@ -174,6 +174,65 @@ function renderChatBubble(): string {
         // A failed refresh leaves the page as it was; the booking itself is already stored.
       }
     };
+    const rectOf = (day) => {
+      const cell = document.querySelector('.cell[data-day="' + day + '"]');
+      return cell ? cell.getBoundingClientRect() : null;
+    };
+    const animateChanges = async (changes) => {
+      if (!Array.isArray(changes) || changes.length === 0) return;
+      const before = changes.map((change) => ({ change, from: change.fromDay ? rectOf(change.fromDay) : null }));
+      await refreshCalendar();
+      const overlay = document.createElement('div');
+      overlay.id = 'calendar-fx';
+      overlay.className = 'active';
+      const trash = document.createElement('div');
+      trash.className = 'fx-trash';
+      trash.textContent = '🗑';
+      document.body.appendChild(overlay);
+      document.body.appendChild(trash);
+      document.body.classList.add('calendar-fx-active');
+      for (const item of before) {
+        const change = item.change;
+        const to = change.toDay ? rectOf(change.toDay) : null;
+        const start = item.from || to;
+        if (!start) continue;
+        const ghost = document.createElement('span');
+        ghost.className = 'fx-ghost session kind-' + change.kind;
+        ghost.textContent = change.title || change.kind;
+        ghost.style.left = start.left + 'px';
+        ghost.style.top = start.top + 'px';
+        ghost.style.width = start.width + 'px';
+        document.body.appendChild(ghost);
+        const end = change.action === 'remove' ? { left: innerWidth / 2, top: innerHeight - 70 } : (to || start);
+        const dx = end.left - start.left;
+        const dy = end.top - start.top;
+        const frames = [
+          { transform: 'translate(0, 0) scale(1) rotate(0deg)', opacity: 1 },
+          { transform: 'translate(' + dx * 0.5 + 'px, ' + (dy * 0.5 - 90) + 'px) scale(1.9) rotate(-9deg)', opacity: 1, offset: 0.55 },
+          { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(' + (change.action === 'remove' ? 0.15 : 1) + ') rotate(9deg)', opacity: change.action === 'remove' ? 0 : 1 },
+        ];
+        if (ghost.animate) {
+          ghost.animate(frames, { duration: 950, easing: 'cubic-bezier(.2,.8,.2,1)' }).onfinish = () => ghost.remove();
+        } else {
+          ghost.remove();
+        }
+        if (change.action === 'remove') {
+          trash.classList.add('pop');
+          if (navigator.vibrate) navigator.vibrate(60);
+        }
+        const pulseDay = change.action === 'remove' ? change.fromDay : change.toDay;
+        const target = pulseDay ? document.querySelector('.cell[data-day="' + pulseDay + '"]') : null;
+        if (target) {
+          target.classList.add(change.action === 'remove' ? 'fx-delete' : 'fx-land');
+          setTimeout(() => target.classList.remove('fx-delete', 'fx-land'), 1300);
+        }
+      }
+      setTimeout(() => {
+        overlay.remove();
+        trash.remove();
+        document.body.classList.remove('calendar-fx-active');
+      }, 1200);
+    };
     bubble.addEventListener('click', show);
     close.addEventListener('click', hide);
     form.addEventListener('submit', async (event) => {
@@ -191,8 +250,8 @@ function renderChatBubble(): string {
         if (!response.ok) add('error', data && data.error ? data.error.detail : 'The coach could not answer.');
         else {
           add('coach', data.reply);
-          if (data.sessions > 0) {
-            await refreshCalendar();
+          if (data.sessions > 0 || (Array.isArray(data.changes) && data.changes.length > 0)) {
+            await animateChanges(data.changes || []);
             add('system', 'Calendar updated · 日曆已更新');
           }
         }
@@ -295,7 +354,7 @@ export function createWeb(options: WebOptions): WebApp {
           });
           const payload = (await upstream.json()) as {
             choices?: Array<{ message?: { content?: unknown } }>;
-            poc2?: { sessions?: number };
+            poc2?: { sessions?: number; changes?: unknown[] };
             error?: { detail?: string };
           };
           const reply = payload.choices?.[0]?.message?.content;
@@ -305,7 +364,7 @@ export function createWeb(options: WebOptions): WebApp {
             return;
           }
           response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-          response.end(JSON.stringify({ reply, sessions: payload.poc2?.sessions ?? 0 }));
+          response.end(JSON.stringify({ reply, sessions: payload.poc2?.sessions ?? 0, changes: payload.poc2?.changes ?? [] }));
         } catch (error) {
           response.writeHead(502, { "content-type": "application/json; charset=utf-8" });
           response.end(JSON.stringify({ error: { detail: error instanceof Error ? error.message : String(error) } }));

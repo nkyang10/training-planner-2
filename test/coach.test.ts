@@ -92,3 +92,50 @@ describe("coach turn", () => {
     expect(built[0]?.content).toBe("m10");
   });
 });
+
+describe("coach schedule actions", () => {
+  it("accepts update and remove actions that name a session", () => {
+    const result = parseCoachTurn(
+      {
+        reply: "Moved Friday and removed Sunday.",
+        sessions: [
+          { action: "update", sessionId: "session:a", day: "2026-11-07", title: "Easy 4 km", kind: "easy", distanceKm: 4, durationMin: 30 },
+          { action: "remove", sessionId: "session:b" },
+        ],
+      },
+      TODAY,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.turn.sessions[0]?.action).toBe("update");
+      expect(result.turn.sessions[0]?.sessionId).toBe("session:a");
+      expect(result.turn.sessions[1]?.action).toBe("remove");
+    }
+  });
+
+  it("rejects an update without a session id and an unknown action", () => {
+    expect(parseCoachTurn({ reply: "x", sessions: [{ action: "update", day: "2026-11-07", title: "Run", kind: "easy" }] }, TODAY)).toMatchObject({
+      ok: false,
+      code: "missing-session-id",
+    });
+    expect(parseCoachTurn({ reply: "x", sessions: [{ action: "delete", day: "2026-11-07" }] }, TODAY)).toMatchObject({
+      ok: false,
+      code: "invalid-action",
+    });
+  });
+
+  it("puts the conversation so far into the prompt", () => {
+    const prompt = buildCoachPrompt({
+      today: TODAY,
+      memories: [],
+      sessions: [],
+      activities: [],
+      history: [message("user", "I ran 5 km yesterday"), message("assistant", "Nice, keep it easy")],
+      question: "What next?",
+    });
+    expect(prompt).toContain("Conversation so far");
+    expect(prompt).toContain("Runner: I ran 5 km yesterday");
+    expect(prompt).toContain("Coach: Nice, keep it easy");
+  });
+});
+

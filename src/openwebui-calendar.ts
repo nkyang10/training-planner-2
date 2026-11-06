@@ -30,6 +30,8 @@ export interface CalendarMirrorResult {
 
 export interface CalendarMirror {
   ensureEvents(events: readonly CalendarEventDraft[]): Promise<CalendarMirrorResult>;
+  /** Delete the native events that mirror the given PoC2 session ids; returns how many were deleted. */
+  removeEvents(sessionIds: readonly string[]): Promise<number>;
 }
 
 export class OpenWebUiCalendarError extends Error {
@@ -124,19 +126,51 @@ export function createOpenWebUiCalendar(options: OpenWebUiCalendarOptions): Cale
     return (await response.json()) as EventRecord[];
   };
 
+  const removeByIds = async (sessionIds: readonly string[]): Promise<number> => {
+    if (sessionIds.length === 0) return 0;
+    await ensureToken();
+    const today = new Date();
+    const from = new Date(today.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const to = new Date(today.getTime() + 120 * 86_400_000).toISOString().slice(0, 10);
+    const existing = await listEvents(from, to);
+    const wanted = new Set(sessionIds);
+    let deleted = 0;
+    for (const event of existing) {
+      const sessionId = event.meta?.["poc2_session_id"];
+      if (typeof sessionId !== "string" || !wanted.has(sessionId)) continue;
+      const response = await request(`/api/v1/calendars/events/${encodeURIComponent(event.id)}/delete`, { method: "DELETE" });
+      if (response.ok) deleted += 1;
+    }
+    return deleted;
+  };
+
   return {
+    removeEvents: removeByIds,
     async ensureEvents(events: readonly CalendarEventDraft[]): Promise<CalendarMirrorResult> {
       if (events.length === 0) return { created: 0, updated: 0, skipped: 0 };
+      for (const event of events) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(event.day)) throw new OpenWebUiCalendarError(`invalid day: ${event.day}`, 0);
+      }
       await ensureToken();
       const calendar = await ensureCalendar();
       const days = events.map((event) => event.day).sort();
       const first = days[0] ?? "";
       const last = days[days.length - 1] ?? "";
-      const existing = await listEvents(first, last);
-      const bySession = new Map<string, string>();
+      // An update may move a session: the old native event can sit outside the new day range, so list a generous window
+      // around both today and the drafted days. Duplicate native events for one session are collapsed to the newest.
+      const today = new Date().toISOString().slice(0, 10);
+      const shift = (day: string, delta: number): string =>
+        new Date(Date.parse(`${day}T00:00:00.000Z`) + delta * 86_400_000).toISOString().slice(0, 10);
+      const from = shift(first < today ? first : today, -90);
+      const to = shift(last > today ? last : today, 180);
+      const existing = await listEvents(from, to);
+      const bySession = new Map<string, string[]>();
       for (const event of existing) {
         const sessionId = event.meta?.["poc2_session_id"];
-        if (typeof sessionId === "string") bySession.set(sessionId, event.id);
+        if (typeof sessionId !== "string") continue;
+        const list = bySession.get(sessionId) ?? [];
+        list.push(event.id);
+        bySession.set(sessionId, list);
       }
       let created = 0;
       let updated = 0;
@@ -152,7 +186,8 @@ export function createOpenWebUiCalendar(options: OpenWebUiCalendarOptions): Cale
           all_day: true,
           meta: { source: "poc2-coach", poc2_session_id: event.sessionId, kind: event.kind },
         };
-        const existingId = bySession.get(event.sessionId);
+        const existingIds = bySession.get(event.sessionId) ?? [];
+        const existingId = existingIds[0];
         if (existingId === undefined) {
           const response = await request("/api/v1/calendars/events/create", { method: "POST", body: JSON.stringify(payload) });
           if (!response.ok) throw new OpenWebUiCalendarError(`Open WebUI create answered ${response.status}`, response.status);
@@ -163,6 +198,10 @@ export function createOpenWebUiCalendar(options: OpenWebUiCalendarOptions): Cale
             body: JSON.stringify(payload),
           });
           if (!response.ok) throw new OpenWebUiCalendarError(`Open WebUI update answered ${response.status}`, response.status);
+          // If a previous mirror left duplicates, delete all but the one just updated.
+          for (const duplicateId of existingIds.slice(1)) {
+            await request(`/api/v1/calendars/events/${encodeURIComponent(duplicateId)}/delete`, { method: "DELETE" });
+          }
           updated += 1;
         }
       }

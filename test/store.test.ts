@@ -245,3 +245,27 @@ describe("user isolation", () => {
     expect(store.listActivities("u3")).toEqual([]);
   });
 });
+
+describe("session CRUD for coach actions", () => {
+  it("gets and deletes one session without touching another", () => {
+    const { store, close } = createStore(":memory:");
+    const base = {
+      userId: "u",
+      title: "Easy 5 km",
+      kind: "easy" as const,
+      distanceKm: 5,
+      durationMin: 35,
+      note: null,
+      createdAt: "2026-11-05T00:00:00.000Z",
+    };
+    store.upsertSession({ ...base, sessionId: "s1", day: "2026-11-06" });
+    store.upsertSession({ ...base, sessionId: "s2", day: "2026-11-07", title: "Long 8 km", kind: "long" });
+    expect(store.getSession("u", "s1")?.title).toBe("Easy 5 km");
+    expect(store.deleteSession("u", "s1")).toBe(true);
+    expect(store.getSession("u", "s1")).toBeUndefined();
+    expect(store.deleteSession("u", "missing")).toBe(false);
+    expect(store.listSessions("u", "2026-11-01", "2026-11-30")).toHaveLength(1);
+    close();
+  });
+});
+

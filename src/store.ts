@@ -8,7 +8,7 @@ import type { Activity, Memory, Message, Store, TrainingSession } from "./types"
  * package. A runtime require keeps the same synchronous API in Node and tests.
  */
 interface SqliteStatement {
-  run(...params: unknown[]): unknown;
+  run(...params: unknown[]): { changes: number | bigint };
   all(...params: unknown[]): Record<string, unknown>[];
   get(...params: unknown[]): Record<string, unknown> | undefined;
 }
@@ -143,6 +143,18 @@ class SqliteStore implements Store {
       )
       .all(userId, fromDay, toDay);
     return rows.map((row) => decode<TrainingSession>(String(row["payload"])));
+  }
+
+  getSession(userId: string, sessionId: string): TrainingSession | undefined {
+    const row = this.db
+      .prepare("SELECT payload FROM sessions WHERE user_id = ? AND session_id = ?")
+      .get(userId, sessionId);
+    return row === undefined ? undefined : decode<TrainingSession>(String(row["payload"]));
+  }
+
+  deleteSession(userId: string, sessionId: string): boolean {
+    const result = this.db.prepare("DELETE FROM sessions WHERE user_id = ? AND session_id = ?").run(userId, sessionId);
+    return Number(result.changes) > 0;
   }
 
   upsertSession(session: TrainingSession): void {
