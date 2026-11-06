@@ -22,7 +22,8 @@ login (Open WebUI) → chat (one turn at a time) → coach books future sessions
 | Chat bubble | inside the calendar `:8091` | quick turns without leaving the calendar; same gateway, same memory, same writes |
 
 The bubble is not an iframe of Open WebUI. It is a small same-origin client of `POST /chat`, which proxies to the coach
-gateway (ADR-0003). A booking made in the bubble appears in the calendar after a refresh; the bubble says so.
+gateway (ADR-0003). When a turn books sessions, the bubble calls `GET /calendar/data?month=…` and re-renders the month
+cells in place, so the grid updates without a page reload.
 
 ## Rules the design keeps
 

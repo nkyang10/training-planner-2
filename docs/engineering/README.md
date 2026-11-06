@@ -59,6 +59,12 @@ After a validated turn books sessions, the gateway creates or updates one all-da
 calendar. Events carry `meta.poc2_session_id`, so re-planning updates instead of duplicating. A mirror failure does not
 lose the booking in PoC2's SQLite.
 
+## Calendar auto-refresh
+
+`GET /calendar/data?month=YYYY-MM` returns `{month, days: {day: {sessions, activities}}}` for the signed-in runner.
+The in-calendar bubble calls it after a booking and re-renders the `.cell[data-day]` chips and Garmin badges in place; a
+failed refresh leaves the page unchanged (the booking is already stored).
+
 ## Gates
 
 ```powershell

@@ -120,6 +120,9 @@ describe("in-calendar coach bubble", () => {
     expect(html).toContain('id="coach-bubble"');
     expect(html).toContain("fetch('/chat'");
     expect(html).toContain('id="coach-panel"');
+    expect(html).toContain('data-month="2026-11"');
+    expect(html).toContain('data-day="2026-11-06"');
+    expect(html).toContain("refreshCalendar");
   });
 
   it("proxies a chat turn through the calendar origin", async () => {
@@ -169,6 +172,32 @@ describe("in-calendar coach bubble", () => {
     });
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/login");
+  });
+});
+
+describe("calendar auto-refresh data", () => {
+  it("returns sessions and activity counts for the month grid", async () => {
+    const { handle, web, base } = await start();
+    cleanup = async () => {
+      await web.close();
+      handle.close();
+    };
+    const response = await fetch(`${base}/calendar/data?month=2026-11`, { headers: { cookie: "poc2=demo-token" } });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { month: string; days: Record<string, { sessions: Array<{ title: string }>; activities: number }> };
+    expect(body.month).toBe("2026-11");
+    expect(body.days["2026-11-06"]?.sessions[0]?.title).toBe("Easy 5 km");
+    expect(body.days["2026-11-06"]?.activities).toBe(0);
+  });
+
+  it("refuses the data endpoint without a session", async () => {
+    const { handle, web, base } = await start();
+    cleanup = async () => {
+      await web.close();
+      handle.close();
+    };
+    const response = await fetch(`${base}/calendar/data?month=2026-11`, { redirect: "manual" });
+    expect(response.status).toBe(303);
   });
 });
 

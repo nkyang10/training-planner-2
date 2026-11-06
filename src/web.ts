@@ -144,6 +144,36 @@ function renderChatBubble(): string {
       log.scrollTop = log.scrollHeight;
       return line;
     };
+    const monthGrid = document.querySelector('.month[data-month]');
+    const refreshCalendar = async () => {
+      if (!monthGrid) return;
+      const month = monthGrid.getAttribute('data-month');
+      if (!month) return;
+      try {
+        const response = await fetch('/calendar/data?month=' + encodeURIComponent(month));
+        if (!response.ok) return;
+        const data = await response.json();
+        for (const [day, info] of Object.entries(data.days || {})) {
+          const cell = document.querySelector('.cell[data-day="' + day + '"]');
+          if (!cell) continue;
+          cell.querySelectorAll('.session, .done').forEach((node) => node.remove());
+          for (const session of info.sessions || []) {
+            const chip = document.createElement('span');
+            chip.className = 'session kind-' + session.kind;
+            chip.textContent = session.title + (session.distanceKm == null ? '' : ' · ' + session.distanceKm + ' km');
+            cell.appendChild(chip);
+          }
+          if (info.activities > 0) {
+            const done = document.createElement('span');
+            done.className = 'done';
+            done.textContent = '✓ ' + info.activities;
+            cell.appendChild(done);
+          }
+        }
+      } catch {
+        // A failed refresh leaves the page as it was; the booking itself is already stored.
+      }
+    };
     bubble.addEventListener('click', show);
     close.addEventListener('click', hide);
     form.addEventListener('submit', async (event) => {
@@ -161,7 +191,10 @@ function renderChatBubble(): string {
         if (!response.ok) add('error', data && data.error ? data.error.detail : 'The coach could not answer.');
         else {
           add('coach', data.reply);
-          if (data.sessions > 0) add('system', 'Calendar updated — refresh to see ' + data.sessions + ' new session(s).');
+          if (data.sessions > 0) {
+            await refreshCalendar();
+            add('system', 'Calendar updated · 日曆已更新');
+          }
         }
       } catch {
         typing.remove();
@@ -280,6 +313,31 @@ export function createWeb(options: WebOptions): WebApp {
         return;
       }
 
+      if (url.pathname === "/calendar/data" && method === "GET") {
+        const month = url.searchParams.get("month") ?? today.slice(0, 7);
+        if (!/^\d{4}-\d{2}$/.test(month)) {
+          response.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: { detail: "month must be YYYY-MM" } }));
+          return;
+        }
+        const start = monthStart(month);
+        const end = addDays(start, daysInMonth(month) - 1);
+        const sessions = options.store.listSessions(userId, start, end);
+        const activities = options.store.listActivities(userId, 500).filter((activity) => activity.day >= start && activity.day <= end);
+        const days: Record<string, { sessions: Array<{ title: string; kind: string; distanceKm: number | null }>; activities: number }> = {};
+        for (const session of sessions) {
+          const entry = (days[session.day] ??= { sessions: [], activities: 0 });
+          entry.sessions.push({ title: session.title, kind: session.kind, distanceKm: session.distanceKm });
+        }
+        for (const activity of activities) {
+          const entry = (days[activity.day] ??= { sessions: [], activities: 0 });
+          entry.activities += 1;
+        }
+        response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        response.end(JSON.stringify({ month, days }));
+        return;
+      }
+
       if (url.pathname === "/" || url.pathname === "/calendar") {
         const month = url.searchParams.get("month") ?? today.slice(0, 7);
         const start = monthStart(month);
@@ -293,7 +351,7 @@ export function createWeb(options: WebOptions): WebApp {
           const day = `${month}-${String(dayNumber).padStart(2, "0")}`;
           const daySessions = sessions.filter((session) => session.day === day);
           const dayActivities = activities.filter((activity) => activity.day === day);
-          cells.push(`<a class="cell${day === today ? " today" : ""}" href="/day/${escapeHtml(day)}">
+          cells.push(`<a class="cell${day === today ? " today" : ""}" data-day="${escapeHtml(day)}" href="/day/${escapeHtml(day)}">
             <span class="date">${dayNumber}</span>
             ${daySessions.map(sessionChip).join("")}
             ${dayActivities.length === 0 ? "" : `<span class="done">✓ ${dayActivities.length}</span>`}
@@ -310,7 +368,7 @@ export function createWeb(options: WebOptions): WebApp {
             ${synced === null ? "" : `<p class="ok" role="status">Garmin sync: ${escapeHtml(synced)} imported</p>`}
             ${syncError === null ? "" : `<p class="error" role="alert">Garmin sync failed: ${escapeHtml(syncError)}</p>`}
             <div class="dow">${DOW.map((day) => `<span>${day}</span>`).join("")}</div>
-            <div class="month">${cells.join("")}</div>
+            <div class="month" data-month="${escapeHtml(month)}">${cells.join("")}</div>
             <form method="post" action="/sync" class="stack"><button class="btn" type="submit"${options.garmin === undefined ? " disabled" : ""}>Sync Garmin</button>${options.garmin === undefined ? `<span class="muted small">GARMIN_PERSONAL_API_KEY is not set</span>` : ""}</form>
           </section>`;
         sendHtml(response, 200, layout("Calendar", body, chatUrl, true));
